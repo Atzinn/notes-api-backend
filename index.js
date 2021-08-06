@@ -1,84 +1,109 @@
 const express = require('express')
 const cors = require('cors')
-const logger = require('./loggerMiddleware')
+const notFound = require('./middlewares/404')
+const handleErrors = require('./middlewares/handleErrors')
+
+require('dotenv').config()
+require('./mongo')
+
 const app = express()
+const Note = require('./models/Note')
 
 app.use(express.json())
 app.use(cors())
-app.use(logger)
 
-let notes = [
-  {
-    id: 1,
-    content: 'Hello world',
-    date: new Date().toISOString(),
-    important: true
-  },
-  {
-    id: 2,
-    content: 'Hello world 2',
-    date: new Date().toISOString(),
-    important: false
-  },
-  {
-    id: 3,
-    content: 'Hello world 3',
-    date: new Date().toISOString(),
-    important: true
-  }
-]
-
+// Index
 app.get('/', (req, res) => {
   res.send('<h1>Hola mundo</h1>')
 })
 
-app.get('/api/notes', (req, res) => {
+// Get all notes
+app.get('/api/notes', async (req, res) => {
+  const notes = await Note.find({})
   res.json(notes)
 })
 
-app.get('/api/notes/:id', (req, res) => {
-  const id = Number(req.params.id)
-  const note = notes.find((note) => note.id === id)
-  note ? res.json(note) : res.status(404).end()
+// Get just one note
+app.get('/api/notes/:id', (req, res, next) => {
+  const { id } = req.params
+
+  Note.findById(id)
+    .then(note => {
+      return note ? res.json(note) : res.status(404).end()
+    })
+    .catch(err => {
+      next(err)
+    })
 })
 
-app.delete('/api/notes/:id', (req, res) => {
-  const id = Number(req.params.id)
-  notes = notes.filter((note) => note.id !== id)
-  res.status(204).end()
+// Update a note
+app.put('/api/notes/:id', (req, res, next) => {
+  const { id } = req.params
+  const note = req.body
+
+  const newNoteInfo = {
+    content: note.content,
+    important: note.important
+  }
+
+  Note.findByIdAndUpdate(id, newNoteInfo, { new: true })
+    .then(result => res.json(result))
+    .catch(err => next(err))
 })
 
-app.post('/api/notes', (req, res) => {
+// Delete just one note
+app.delete('/api/notes/:id', async (req, res, next) => {
+  const { id } = req.params
+  try {
+    await Note.findByIdAndDelete(id)
+    res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Save a note
+app.post('/api/notes', async (req, res, next) => {
   const usernote = req.body
 
   if (!usernote || !usernote.content) {
-    return res.status(400).json({ error: 'note.content is missing' })
+    return res
+      .status(400)
+      .json({ error: 'note.content is missing' })
   }
 
-  const ids = notes.map((note) => note.id)
-  const maxId = Math.max(...ids)
-
-  const newNote = {
-    id: maxId + 1,
+  const newNote = new Note({
     content: usernote.content,
     important:
       typeof usernote.important !== 'undefined' ? usernote.important : false,
     date: new Date().toISOString()
-  }
-
-  notes = [...notes, newNote]
-
-  res.status(201).json(newNote)
-})
-
-app.use((req, res) => {
-  res.status(404).json({
-    message: 'Not found'
   })
+
+  // newNote.save()
+  //   .then(savedNote => res.status(201).json(savedNote))
+  //   .catch(err => next(err))
+
+  try {
+    const savedNote = await newNote.save()
+    res.status(201).json(savedNote)
+  } catch (err) {
+    next(err)
+  }
 })
+
+// 404 Error
+app.use(notFound)
+
+// Errors
+app.use(handleErrors)
 
 const PORT = process.env.PORT || 3001
 
-app.listen(PORT, () => {
-  console.log('Server runing on port 3001')
+const server = app.listen(PORT, () => {
+  console.log(`Server running in port: ${PORT}`)
 })
+
+module.exports = {
+  app,
+  server
+}
